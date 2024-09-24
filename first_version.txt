@@ -14,28 +14,23 @@ var upgrader = websocket.Upgrader{
 
 type Client struct {
 	hub  *Hub
-	room *Room
 	conn *websocket.Conn
 	send chan []byte
 }
 
-type Room struct {
-	id        string
-	clients   map[*Client]bool
-	broadcast chan []byte
-}
-
 type Hub struct {
-	rooms      map[string]*Room
+	clients    map[*Client]bool
+	broadcast  chan []byte
 	register   chan *Client
 	unregister chan *Client
 }
 
 func newHub() *Hub {
 	return &Hub{
-		rooms:      make(map[string]*Room),
+		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		clients:    make(map[*Client]bool),
 	}
 }
 
@@ -43,25 +38,19 @@ func (h *Hub) run() {
 	for {
 		select {
 		case client := <-h.register:
-			client.room.clients[client] = true
+			h.clients[client] = true
 		case client := <-h.unregister:
-			if _, ok := client.room.clients[client]; ok {
-				delete(client.room.clients, client)
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
 				close(client.send)
 			}
-		default:
-			for _, room := range h.rooms {
+		case message := <-h.broadcast:
+			for client := range h.clients {
 				select {
-				case message := <-room.broadcast:
-					for client := range room.clients {
-						select {
-						case client.send <- message:
-						default:
-							close(client.send)
-							delete(room.clients, client)
-						}
-					}
+				case client.send <- message:
 				default:
+					close(client.send)
+					delete(h.clients, client)
 				}
 			}
 		}
@@ -82,7 +71,7 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		c.room.broadcast <- message
+		c.hub.broadcast <- message
 	}
 }
 
@@ -109,21 +98,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-
-	roomID := r.URL.Query().Get("room_id")
-	if roomID == "" {
-		log.Println("Error: room_id parameter is required")
-		return
-	}
-
-	room, ok := hub.rooms[roomID]
-	if !ok {
-		room = &Room{id: roomID, clients: make(map[*Client]bool), broadcast: make(chan []byte)}
-		hub.rooms[roomID] = room
-	}
-
-	client := &Client{hub: hub, room: room, conn: conn, send: make(chan []byte, 256)}
-	room.clients[client] = true
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.register <- client
 
 	go client.writePump()
