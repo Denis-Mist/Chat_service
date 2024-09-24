@@ -206,6 +206,29 @@ func (c *Client) readPump() {
 			}
 			break
 		}
+
+		log.Printf("Received message from client %d in room %s: %s", c.id, c.room.id, message)
+
+		// Check if the room exists in the rooms table
+		var roomExists bool
+		err = c.hub.db.db.QueryRow("SELECT EXISTS (SELECT 1 FROM rooms WHERE id = $1)", c.room.id).Scan(&roomExists)
+		if err != nil {
+			log.Printf("error: %v", err)
+			break
+		}
+
+		log.Printf("Room %s exists: %t", c.room.id, roomExists)
+
+		if !roomExists {
+			// Create the room if it doesn't exist
+			_, err = c.hub.db.db.Exec("INSERT INTO rooms (id, name) VALUES ($1, $2)", c.room.id, "my_room")
+			if err != nil {
+				log.Printf("error: %v", err)
+				break
+			}
+		}
+
+		log.Printf(" Broadcasting message to room %s", c.room.id)
 		c.room.broadcast <- message
 		_, err = c.hub.db.db.Exec("INSERT INTO messages (room_id, client_id, text) VALUES ($1, $2, $3)", c.room.id, c.id, message)
 		if err != nil {
