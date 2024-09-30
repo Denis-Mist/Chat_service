@@ -187,7 +187,7 @@ type Client struct {
 }
 
 func (c *Client) createClientInDatabase() (int, error) {
-	_, err := c.hub.db.db.Exec(`
+	result, err := c.hub.db.db.Exec(`
         INSERT INTO clients (room_id, username, connected)
         VALUES ($1, $2, $ 3)
         RETURNING id
@@ -196,16 +196,12 @@ func (c *Client) createClientInDatabase() (int, error) {
 		return 0, err
 	}
 
-	var clientId int
-	err = c.hub.db.db.QueryRow(`
-        SELECT id FROM clients
-        WHERE room_id = $1 AND username = $2
-    `, c.room.id, "username").Scan(&clientId)
+	id, err := result.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
 
-	return clientId, nil
+	return int(id), nil
 }
 
 func (c *Client) readPump() {
@@ -216,8 +212,8 @@ func (c *Client) readPump() {
 
 	c.id, _ = c.createClientInDatabase()
 	// if err != nil {
-	// 	log.Printf("error: %v", err)
-	// 	return
+	//  log.Printf("error: %v", err)
+	//  return
 	// }
 
 	for {
@@ -251,6 +247,14 @@ func (c *Client) readPump() {
 		}
 
 		log.Printf(" Broadcasting message to room %s", c.room.id)
+
+		// Update the client's connected status
+		_, err = c.hub.db.db.Exec("UPDATE clients SET connected = TRUE WHERE id = $1", c.id)
+		if err != nil {
+			log.Printf("error: %v", err)
+			break
+		}
+
 		c.room.mutex.Lock()
 		c.room.broadcast <- message
 		c.room.mutex.Unlock()
@@ -258,6 +262,15 @@ func (c *Client) readPump() {
 		if err != nil {
 			log.Printf("error: %v", err)
 		}
+	}
+
+	// Mark the client as disconnected
+	c.hub.mutex.Lock()
+	delete(c.room.clients, c)
+	c.hub.mutex.Unlock()
+	_, err := c.hub.db.db.Exec("UPDATE clients SET connected = FALSE WHERE id = $1", c.id)
+	if err != nil {
+		log.Printf("error: %v", err)
 	}
 }
 
