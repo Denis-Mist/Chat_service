@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 
 	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
@@ -20,7 +19,6 @@ var DbData = map[string]string{
 
 type Database struct {
 	db *sql.DB
-	mu sync.Mutex
 }
 
 func NewDatabase() (*Database, error) {
@@ -65,15 +63,10 @@ func NewDatabase() (*Database, error) {
 }
 
 func (db *Database) Close() error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
 	return db.db.Close()
 }
 
 func (db *Database) CreateTables() error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
 	_, err := db.db.Exec(`
         CREATE TABLE IF NOT EXISTS rooms (
             id VARCHAR(50) PRIMARY KEY,
@@ -118,14 +111,12 @@ type Client struct {
 	conn *websocket.Conn
 	send chan []byte
 	id   int
-	mu   sync.Mutex
 }
 
 type Room struct {
 	id        string
 	clients   map[*Client]bool
 	broadcast chan []byte
-	mu        sync.Mutex
 }
 
 type Hub struct {
@@ -133,7 +124,6 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	db         *Database
-	mu         sync.Mutex
 }
 
 func newHub(db *Database) *Hub {
@@ -149,51 +139,32 @@ func (h *Hub) run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.mu.Lock()
-			client.room.mu.Lock()
 			client.room.clients[client] = true
-			client.room.mu.Unlock()
-			h.mu.Unlock()
 		case client := <-h.unregister:
-			h.mu.Lock()
-			client.room.mu.Lock()
 			if _, ok := client.room.clients[client]; ok {
 				delete(client.room.clients, client)
 				close(client.send)
 			}
-			client.room.mu.Unlock()
-			h.mu.Unlock()
 		default:
-			h.mu.Lock()
 			for _, room := range h.rooms {
-				room.mu.Lock()
 				select {
 				case message := <-room.broadcast:
 					for client := range room.clients {
-						client.mu.Lock()
 						select {
 						case client.send <- message:
 						default:
 							close(client.send)
 							delete(room.clients, client)
 						}
-						client.mu.Unlock()
 					}
 				default:
 				}
-				room.mu.Unlock()
 			}
-			h.mu.Unlock()
 		}
 	}
 }
 
 func (c *Client) createClientInDatabase() (int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.hub.db.mu.Lock()
-	defer c.hub.db.mu.Unlock()
-
 	_, err := c.hub.db.db.Exec(`
         INSERT INTO clients (room_id, username, connected)
         VALUES ($1, $2, $3)
@@ -221,9 +192,7 @@ func (c *Client) readPump() {
 		c.conn.Close()
 	}()
 
-	c.mu.Lock()
 	c.id, _ = c.createClientInDatabase()
-	c.mu.Unlock()
 	// if err != nil {
 	// 	log.Printf("error: %v", err)
 	// 	return
@@ -242,9 +211,7 @@ func (c *Client) readPump() {
 
 		// Check if the room exists in the rooms table
 		var roomExists bool
-		c.hub.db.mu.Lock()
 		err = c.hub.db.db.QueryRow("SELECT EXISTS (SELECT 1 FROM rooms WHERE id = $1)", c.room.id).Scan(&roomExists)
-		c.hub.db.mu.Unlock()
 		if err != nil {
 			log.Printf("error: %v", err)
 			break
@@ -254,9 +221,7 @@ func (c *Client) readPump() {
 
 		if !roomExists {
 			// Create the room if it doesn't exist
-			c.hub.db.mu.Lock()
 			_, err = c.hub.db.db.Exec("INSERT INTO rooms (id, name) VALUES ($1, $2)", c.room.id, "my_room")
-			c.hub.db.mu.Unlock()
 			if err != nil {
 				log.Printf("error: %v", err)
 				break
@@ -264,12 +229,8 @@ func (c *Client) readPump() {
 		}
 
 		log.Printf(" Broadcasting message to room %s", c.room.id)
-		c.room.mu.Lock()
 		c.room.broadcast <- message
-		c.room.mu.Unlock()
-		c.hub.db.mu.Lock()
 		_, err = c.hub.db.db.Exec("INSERT INTO messages (room_id, client_id, text) VALUES ($1, $2, $3)", c.room.id, c.id, message)
-		c.hub.db.mu.Unlock()
 		if err != nil {
 			log.Printf("error: %v", err)
 		}
@@ -311,18 +272,14 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hub.mu.Lock()
 	room, ok := hub.rooms[roomID]
 	if !ok {
 		room = &Room{id: roomID, clients: make(map[*Client]bool), broadcast: make(chan []byte)}
 		hub.rooms[roomID] = room
 	}
-	hub.mu.Unlock()
 
 	client := &Client{hub: hub, room: room, conn: conn, send: make(chan []byte, 256)}
-	room.mu.Lock()
 	room.clients[client] = true
-	room.mu.Unlock()
 	hub.register <- client
 
 	go client.writePump()
