@@ -19,9 +19,9 @@ import (
 // Конфигурация базы данных
 const (
 	host     = "localhost"
-	port     = 5433
+	port     = 5432
 	user     = "postgres"
-	password = "12345678"
+	password = "ghbdtn"
 	dbname   = "MyChat"
 )
 
@@ -61,8 +61,8 @@ type Message struct {
 	Message   string    `json:"message"`
 	Room      string    `json:"room"`
 	Timestamp time.Time `json:"timestamp"`
-
-	File string `json:"file"`
+	Edited    bool      `json:"edited"`
+	File      string    `json:"file"`
 }
 
 func main() {
@@ -96,6 +96,7 @@ func main() {
             message TEXT NOT NULL,
             timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             file VARCHAR(255),
+			edited BOOLEAN NOT NULL DEFAULT FALSE,
             FOREIGN KEY (room_id) REFERENCES rooms (room_id),
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         );
@@ -114,6 +115,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
+
 }
 
 func homePage(w http.ResponseWriter, r *http.Request) {
@@ -320,9 +322,10 @@ func (r *Room) editMessage(messageID int, newMessage string) error {
 	for i, msg := range r.Messages {
 		if msg.MessageID == messageID {
 			r.Messages[i].Message = newMessage
+			r.Messages[i].Edited = true // Обновляем поле edited
 
 			// Обновляем сообщение в базе данных
-			_, err := db.Exec("UPDATE messages SET message = $1 WHERE message_id = $2", newMessage, messageID)
+			_, err := db.Exec("UPDATE messages SET message = $1, edited = TRUE WHERE message_id = $2", newMessage, messageID)
 			if err != nil {
 				return err
 			}
@@ -334,7 +337,6 @@ func (r *Room) editMessage(messageID int, newMessage string) error {
 	return errors.New("сообщение не найдено")
 }
 
-// Добавляем новую функцию в функцию handleConnections
 func handleEditMessage(conn *websocket.Conn, room *Room, messageID int, newMessage string) error {
 	err := room.editMessage(messageID, newMessage)
 	if err != nil {
