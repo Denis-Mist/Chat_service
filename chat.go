@@ -18,6 +18,14 @@ const (
 	dbname   = "MyChat"
 )
 
+// Определение структуры Message
+type Message struct {
+	MessageID int    `json:"message_id"`
+	Username  string `json:"username"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+}
+
 func getRooms(c *fiber.Ctx) error {
 	var rooms []string
 
@@ -79,6 +87,41 @@ func deleteRoom(c *fiber.Ctx) error {
 	return c.SendString("Room and associated messages deleted successfully")
 }
 
+func getMessagesByRoomName(c *fiber.Ctx) error {
+	roomName := c.Params("name")
+	var messages []Message
+
+	rows, err := db.Query(`
+		SELECT m.message_id, u.username, m.message, m.timestamp 
+		FROM messages m 
+		JOIN users u ON m.user_id = u.user_id 
+		JOIN rooms r ON m.room_id = r.room_id 
+		WHERE r.name = $1
+	`, roomName)
+	if err != nil {
+		return c.Status(500).SendString("Error querying messages: " + err.Error())
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var msg Message
+		if err := rows.Scan(&msg.MessageID, &msg.Username, &msg.Message, &msg.Timestamp); err != nil {
+			return c.Status(500).SendString("Error scanning message: " + err.Error())
+		}
+		messages = append(messages, msg)
+	}
+
+	if err := rows.Err(); err != nil {
+		return c.Status(500).SendString("Error with rows: " + err.Error())
+	}
+
+	if len(messages) == 0 {
+		return c.Status(404).SendString("No messages found for this room")
+	}
+
+	return c.JSON(messages)
+}
+
 func main() {
 	// Подключение к базе данных
 	var err error
@@ -94,6 +137,7 @@ func main() {
 
 	app.Get("/rooms", getRooms)
 	app.Delete("/rooms/:name", deleteRoom) // Добавление маршрута для удаления комнаты
+	app.Get("/rooms/:name/messages", getMessagesByRoomName)
 
 	err = app.Listen(":8080")
 	if err != nil {
