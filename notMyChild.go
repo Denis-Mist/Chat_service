@@ -85,9 +85,10 @@ func main() {
         );
 
         CREATE TABLE IF NOT EXISTS rooms (
-            room_id SERIAL PRIMARY KEY,
-            name VARCHAR(255) NOT NULL
-        );
+			room_id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			type INTEGER DEFAULT 0
+		);
 
         CREATE TABLE IF NOT EXISTS messages (
             message_id SERIAL PRIMARY KEY,
