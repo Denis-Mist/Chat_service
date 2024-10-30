@@ -14,7 +14,7 @@ const (
 	host     = "localhost"
 	port     = 5432
 	user     = "postgres"
-	password = "ghbdtn"
+	password = "yourpassword"
 	dbname   = "MyChat"
 )
 
@@ -139,7 +139,7 @@ func main() {
 	app.Delete("/rooms/:name", deleteRoom) // Добавление маршрута для удаления комнаты
 	app.Get("/rooms/:name/messages", getMessagesByRoomName)
 
-	err = app.Listen(":8080")
+	err = app.Listen(":8000")
 	if err != nil {
 		fmt.Println(err)
 		return

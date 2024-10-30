@@ -21,7 +21,7 @@ const (
 	host     = "localhost"
 	port     = 5432
 	user     = "postgres"
-	password = "ghbdtn"
+	password = "yourpassword"
 	dbname   = "MyChat"
 )
 
