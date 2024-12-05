@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>File Upload via WebSocket</title>
+</head>
+<body>
+    <input type="file" id="fileInput" />
+    <button id="uploadButton">Upload</button>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:5050/upload");
+
+        document.getElementById('uploadButton').onclick = function() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (file) {
+                ws.onopen = function() {
+                    ws.send(file);
+                };
+            } else {
+                alert("Please select a file to upload.");
+            }
+        };
+
+        ws.onmessage = function(event) {
+            console.log("Server response: ", event.data);
+        };
+    </script>
+</body>
+</html>
