@@ -19,9 +19,9 @@ import (
 // Конфигурация базы данных
 const (
 	host     = "localhost"
-	port     = 5432
+	port     = 8080
 	user     = "postgres"
-	password = "yourpassword"
+	password = "ghbdtn"
 	dbname   = "MyChat"
 )
 
@@ -62,7 +62,7 @@ type Message struct {
 	Room      string    `json:"room"`
 	Timestamp time.Time `json:"timestamp"`
 	Edited    bool      `json:"edited"`
-	File      string    `json:"file"`
+	File      string    `json:"file"` // Поле для имени файла
 }
 
 func main() {
@@ -111,7 +111,7 @@ func main() {
 	http.HandleFunc("/ws", handleConnections)
 
 	fmt.Println("Server started on :8080")
-	err = http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(":5050", nil)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -131,7 +131,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Get the room name from the query parameter
+	// Получаем имя комнаты и имя пользователя из параметров запроса
 	roomName := r.URL.Query().Get("room")
 	username := r.URL.Query().Get("username")
 
@@ -159,7 +159,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 	room, ok := rooms[roomName]
 	roomsMu.RUnlock()
 
-	// Create a new room if it doesn't exist
+	// Создаем новую комнату, если она не существует
 	if !ok {
 		room = &Room{
 			Name:          roomName,
@@ -172,7 +172,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		roomsMu.Lock()
 		rooms[roomName] = room
 		roomsMu.Unlock()
-		go handleRoomBroadcast(room) // Start the broadcast loop
+		go handleRoomBroadcast(room) // Запускаем цикл широковещательной рассылки
 
 		// Добавление комнаты в базу данных
 		var roomID int
@@ -205,6 +205,35 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
+			if msg.File != "" {
+				// Обработка отправки файла
+				file, err := os.Open(msg.File)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				defer file.Close()
+
+				// Сохранение файла на сервере
+				filename := fmt.Sprintf("%s_%s", time.Now().Format("2006-01-02_15-04-05"), filepath.Base(msg.File))
+				newFile, err := os.Create(filename)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				defer newFile.Close()
+
+				_, err = io.Copy(newFile, file)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+
+				// Обновление сообщения с файлом
+				msg.File = filename
+			}
+
+			// Обработка отправки текстового сообщения
 			if msg.MessageID != 0 {
 				if msg.Message == "" {
 					// Обработка запроса на удаление сообщения
@@ -223,34 +252,6 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				// Обработка отправки нового сообщения
-				if msg.File != "" {
-					// Обработка отправки файла
-					file, err := os.Open(msg.File)
-					if err != nil {
-						fmt.Println(err)
-						return
-					}
-					defer file.Close()
-
-					// Сохранение файла на сервере
-					filename := fmt.Sprintf("%s_%s", time.Now().Format("2006-01-02_15-04-05"), filepath.Base(msg.File))
-					newFile, err := os.Create(filename)
-					if err != nil {
-						fmt.Println(err)
-						return
-					}
-					defer newFile.Close()
-
-					_, err = io.Copy(newFile, file)
-					if err != nil {
-						fmt.Println(err)
-						return
-					}
-
-					// Обновление сообщения с файлом
-					msg.File = filename
-				}
-
 				msg.UserID = user.UserID
 				msg.Username = user.Username
 				msg.Room = roomName
@@ -316,6 +317,7 @@ func handleConnections(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
 func (r *Room) editMessage(messageID int, newMessage string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
